@@ -62,7 +62,7 @@ class Redis
 
       if timeout.nil? || timeout > 0
         # passing timeout 0 to blpop causes it to block
-        _key, current_token = @redis.blpop(available_key, timeout || 0)
+        _key, current_token = @redis.blpop(available_key, timeout: timeout || 0)
       else
         current_token = @redis.lpop(available_key)
       end
@@ -105,22 +105,22 @@ class Redis
     def signal(token = 1)
       token ||= generate_unique_token
 
-      @redis.multi do
-        @redis.hdel grabbed_key, token
-        @redis.lpush available_key, token
+      @redis.multi do |pipeline|
+        pipeline.hdel grabbed_key, token
+        pipeline.lpush available_key, token
 
-        set_expiration_if_necessary
+        set_expiration_if_necessary(pipeline)
       end
     end
 
     def exists?
-      @redis.exists(exists_key)
+      @redis.exists?(exists_key)
     end
 
     def all_tokens
-      @redis.multi do
-        @redis.lrange(available_key, 0, -1)
-        @redis.hkeys(grabbed_key)
+      @redis.multi do |pipeline|
+        pipeline.lrange(available_key, 0, -1)
+        pipeline.hkeys(grabbed_key)
       end.flatten
     end
 
@@ -184,23 +184,23 @@ class Redis
     def create!
       @redis.expire(exists_key, 10)
 
-      @redis.multi do
-        @redis.del(grabbed_key)
-        @redis.del(available_key)
+      @redis.multi do |pipeline|
+        pipeline.del(grabbed_key)
+        pipeline.del(available_key)
         @resource_count.times do |index|
-          @redis.rpush(available_key, index)
+          pipeline.rpush(available_key, index)
         end
-        @redis.set(version_key, API_VERSION)
-        @redis.persist(exists_key)
+        pipeline.set(version_key, API_VERSION)
+        pipeline.persist(exists_key)
 
-        set_expiration_if_necessary
+        set_expiration_if_necessary(pipeline)
       end
     end
 
-    def set_expiration_if_necessary
+    def set_expiration_if_necessary(pipeline)
       if @expiration
         [available_key, exists_key, version_key].each do |key|
-          @redis.expire(key, @expiration)
+          pipeline.expire(key, @expiration)
         end
       end
     end
